@@ -1,0 +1,6 @@
+{
+  "AzureAD": {
+    "tenantCommon": "common",
+    "clientID": "your-tenant-id"
+  }
+}

@@ -18,7 +18,10 @@ using Microsoft.Graph;
 using Microsoft.Graph.Auth;
 using Microsoft.Identity.Client;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using WpfAzureADDemo.Configuration;
 using WpfAzureADDemo.Models;
+using WpfAzureADDemo.Services;
 
 namespace WpfAzureADDemo
 {
@@ -27,70 +30,36 @@ namespace WpfAzureADDemo
     /// </summary>
     public partial class MainWindow : Window
     {
-        string[] scopes = new string[] { "user.read" };
-        string[] scopesToGetTenantNames = new string[] { "Directory.Read.All" };
-        string[] scopesToCreateApp = new string[] { "Directory.AccessAsUser.All" };
-        string[] scopesForGraph = new string[] { "user.read", "Directory.Read.All", "Directory.AccessAsUser.All" };
+        readonly ARMService _armService;
+        readonly GraphService _graphService;
+        readonly AzureADSettings azureSettings = ConfigurationHelper.Instance.AzureADSettings;
 
         string[] managementScopes = new string[] { "https://management.azure.com/user_impersonation" };
-
-        private readonly IPublicClientApplication _app = App.PublicClientApp;
-
+        
         public MainWindow()
         {
             InitializeComponent();
+
+            var httpService = new HttpService();
+            _graphService = new GraphService(httpService);
+            _armService = new ARMService(httpService);
         }
 
         private async void SignInButton_Click(object sender, RoutedEventArgs e)
         {
             ResultText.Text = "Loading...";
-            TokenInfoText.Text = "Loading...";
 
-            var authResult = await AuthenticateUser();
-
-            if (authResult is null)
-            {
-                return;
-            }
-
-            ResultText.Text = $"The user {authResult.Account.Username} has successfully logged";
-            TokenInfoText.Text = $"Username: {authResult.Account.Username}" + Environment.NewLine;
-            TokenInfoText.Text += $"Token Expires: {authResult.ExpiresOn.ToLocalTime()}" + Environment.NewLine;
-
-            this.SignInButton.Visibility = Visibility.Collapsed;
-            //this.SignInWithSdkButton.Visibility = Visibility.Collapsed;
-            this.SignOutButton.Visibility = Visibility.Visible;
-
-            this.GetUserInfoButton.Visibility = Visibility.Visible;
-            this.GetTenantARMButton.Visibility = Visibility.Visible;
-            this.GetTenantGraphButton.Visibility = Visibility.Visible;
-            this.CreateAppButton.Visibility = Visibility.Visible;
+            var authResult = await _graphService.AuthenticateUser();
+            ChangeButtonStatus(authResult);
         }
 
         private async void SignOutButton_Click(object sender, RoutedEventArgs e)
         {
-            var account = await GetAccount();
-
-            if(account == null)
-            {
-                return;
-            }
-
             try
             {
-                await _app.RemoveAsync(account);
+                await _graphService.SignOut();
 
-                this.ResultText.Text = "User has signed-out";
-                this.TokenInfoText.Text = string.Empty;
-
-                this.SignInButton.Visibility = Visibility.Visible;
-                this.SignInWithSdkButton.Visibility = Visibility.Visible;
-                this.SignOutButton.Visibility = Visibility.Collapsed;
-
-                this.GetUserInfoButton.Visibility = Visibility.Collapsed;
-                this.GetTenantARMButton.Visibility = Visibility.Collapsed;
-                this.GetTenantGraphButton.Visibility = Visibility.Collapsed;
-                this.CreateAppButton.Visibility = Visibility.Collapsed;
+                ChangeButtonStatus();
 
             }
             catch (MsalException ex)
@@ -99,296 +68,133 @@ namespace WpfAzureADDemo
             }
         }
 
-        private async void GetUserInfoButton_Click(object sender, RoutedEventArgs e)
-        {
-            ResultText.Text = "Loading...";
-
-            var userInfo = await GetUserWithGraphHttpRequest();
-
-            ResultText.Text = userInfo;
-        }
-
         private async void GetTenantWithARMButton_Click(object sender, RoutedEventArgs e)
         {
+            TenantList.Items.Clear();
             ResultText.Text = "Loading...";
 
-            var tenant = await GetTenantsWithARM();
+            var token = await _graphService.GetAccessToken(managementScopes);
+            var tenants = await _armService.GetTenants(token);
 
-            var tenantsInfo = tenant.Select(t => $"{t.DisplayName} - tenant: {t.TenantId}");
-            ResultText.Text = string.Join("\n\n", tenantsInfo);
+            ShowTenantInfo(tenants);
         }
 
         private async void GetTenantWithGraphButton_Click(object sender, RoutedEventArgs e)
         {
+            TenantList.Items.Clear();
             ResultText.Text = "Loading...";
 
-            var tenants = await GetTenantsWithARM();
-            var organizations = await GetTenantWithGraph(tenants);
+            var token = await _graphService.GetAccessToken(managementScopes);
+            var tenantsByArm = await _armService.GetTenants(token);
+            var tenants = await _graphService.GetTenant(tenantsByArm);
 
-            var organizationNames = organizations.Select(s => $"{s.Key} - {s.Value}");
-            ResultText.Text = string.Join("\n\n", organizationNames);
+            ShowTenantInfo(tenants);
         }
-
-        private async Task<AuthenticationResult> AuthenticateUser()
+                
+        private async void CreateAppButton_Click(object sender, RoutedEventArgs e)
         {
-            AuthenticationResult authResult = null;
-
             try
             {
-                // TODO: Scopes??
-                var account = await GetAccount();
-                authResult = await _app
-                                    .AcquireTokenSilent(scopes, account)
-                                    .ExecuteAsync();
-            }
-            catch (MsalUiRequiredException ex)
-            {
-                // A MsalUiRequiredException happened on AcquireTokenSilent.
-                // This indicates you need to call AcquireTokenInteractive to acquire a token
+                ResultText.Text = "Creating app...";
 
-                authResult = await AuthenticationInteractive();
+                var appName = AppNameText.Text;
+                var tenantId = (TenantList.SelectedItem as TenantInfo).TenantId;
+                var audience = (AadAuthorityAudience)AudienceComboBox.SelectedItem;
+
+                var result = await _graphService.CreateApp(appName, tenantId, audience);
+
+                ResultText.Text = JToken.Parse(result).ToString(Formatting.Indented);
             }
             catch (Exception ex)
             {
-                ResultText.Text = $"Error Acquiring Token Silently:{System.Environment.NewLine}{ex}";
+                ResultText.Text = ex.Message;
             }
-
-            return authResult;
         }
 
-        private async Task<AuthenticationResult> AuthenticationInteractive()
+        private async void CreateAppWithSdkButton_Click(object sender, RoutedEventArgs e)
         {
-            AuthenticationResult authResult = null;
-
             try
             {
-                //TODO. Consent all scopes?? only when App have tenantID configuration ??
+                ResultText.Text = "Creating app...";
 
-                var account = await GetAccount();
+                var appName = AppNameText.Text;
+                var tenantId = (TenantList.SelectedItem as TenantInfo).TenantId;
+                var graphSdkService = new GraphSdkService(_graphService, tenantId);
+                var audience = (AadAuthorityAudience)AudienceComboBox.SelectedItem;
 
-                authResult = await _app.AcquireTokenInteractive(scopes)
-                    .WithAccount(account)
-                    .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount)
-                    .WithExtraScopesToConsent(managementScopes)
-                    //.WithExtraScopesToConsent(scopesToGetTenantNames)
-                    //.WithExtraScopesToConsent(scopesToCreateApp)
-                    .ExecuteAsync();
+                var app = await graphSdkService.CreateApp(appName, audience);
+                var appJson = JsonConvert.SerializeObject(app, Formatting.Indented);
+
+                ResultText.Text = appJson;
             }
-            catch (MsalException msalex)
+            catch (ServiceException ex)
             {
-                ResultText.Text = $"Error Acquiring Token:{System.Environment.NewLine}{msalex}";
+                ResultText.Text = ex.InnerException?.Message ?? ex.Message;
             }
-
-            return authResult;
-        }
-
-        private async Task<string> GetUserWithGraphHttpRequest()
-        {
-            string graphAPIUserEndpoint = "https://graph.microsoft.com/beta/me";
-            var accessToken = await GetAccessToken(scopes);
-            var userInfo = await GetHttpContentWithToken(graphAPIUserEndpoint, accessToken);
-
-            return userInfo;
-        }
-
-        private async Task<IEnumerable<TenantInfo>> GetTenantsWithARM()
-        {
-            string azureManagementEndpoint = "https://management.azure.com/tenants?api-version=2017-08-01";
-
-            var accessToken = await GetAccessToken(managementScopes);
-            var result = await GetHttpContentWithToken(azureManagementEndpoint, accessToken);
-            var tenants = JsonConvert.DeserializeObject<GetTenantResult>(result).Value;
-
-            return tenants;
-        }
-
-        private async Task<Dictionary<string, string>> GetTenantWithGraph(IEnumerable<TenantInfo> tenantsInfo)
-        {
-            string graphAPIEndpointOrganizations = "https://graph.microsoft.com/beta/organization";
-            var organizations = new Dictionary<string, string>();
-            var tenants = tenantsInfo.Select(s => s.TenantId);
-
-            foreach (var tenant in tenants)
+            catch (Exception ex)
             {
-                try
-                {
-                    var accessToken = await GetAccessToken(scopesToGetTenantNames, tenant);
-                    var json = await GetHttpContentWithToken(graphAPIEndpointOrganizations, accessToken);
-                    var result = JsonConvert.DeserializeObject<GetOrganizationResult>(json);
-
-                    organizations.Add(tenant, result.Value.First().DisplayName);
-                }
-                catch (Exception ex)
-                {
-                    // You do not have permissions to get the token with that scope, you have to give permissions to the App
-                    organizations.Add(tenant, ex.Message);
-                }
+                ResultText.Text = ex.Message;
             }
-            return organizations;
         }
 
-        private async Task<string> GetAccessToken(string[] scopes, string tenant = null)
+        private void ChangeButtonStatus(AuthenticationResult result = null)
         {
-            // TODO: Merge this method with Authenticate method ??
+            var isLogged = result != null;
 
-            var account = await GetAccount();
-            AuthenticationResult result;
-
-            if (string.IsNullOrWhiteSpace(tenant))
+            if(isLogged)
             {
-                result = await _app.AcquireTokenSilent(scopes, account)
-                                           .ExecuteAsync();
+                ResultText.Text = $"The user {result.Account.Username} has successfully logged";
+                UserInfoText.Text = result.Account.Username;
             }
             else
             {
-                string authority = _app.Authority.Replace(new Uri(_app.Authority).PathAndQuery, $"/{tenant}/");
-
-                result = await _app.AcquireTokenSilent(scopes, account)
-                                          .WithAuthority(authority)
-                                          .ExecuteAsync();
+                ResultText.Text = "User has signed-out";
+                UserInfoText.Text = string.Empty;
+                TenantList.Items.Clear();
             }
 
-            return result.AccessToken;
+            SignInButton.Visibility = isLogged ? Visibility.Collapsed : Visibility.Visible;
+            SignOutButton.Visibility = isLogged ? Visibility.Visible : Visibility.Collapsed;
+            UserInfoText.Visibility = isLogged ? Visibility.Visible : Visibility.Collapsed;
+
+            GetTenantARMButton.IsEnabled = isLogged;
+            GetTenantGraphButton.IsEnabled = isLogged;            
         }
 
-        private async Task<string> GetHttpContentWithToken(string url, string token)
+        private void ShowTenantInfo(IEnumerable<TenantInfo> tenants)
         {
-            try
+            foreach (var tenant in tenants.Where(t => t.IsValid))
             {
-                var httpClient = new HttpClient();
-                HttpResponseMessage response;
-
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                response = await httpClient.SendAsync(request);
-                var content = await response.Content.ReadAsStringAsync();
-                return content;
-            }
-            catch (Exception ex)
-            {
-                return ex.ToString();
-            }
-        }
-
-        private async Task<IAccount> GetAccount()
-        {
-            return (await _app
-                            .GetAccountsAsync())
-                            .FirstOrDefault();
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-        private GraphServiceClient _graphClient;
-
-        private async Task<User> AuthenticateWithSdk()
-        {
-            // TODO : Set all Graph scopes??
-            var authProvider = new InteractiveAuthenticationProvider(_app);
-            _graphClient = new GraphServiceClient(authProvider);
-
-            // force auth, and get data
-            var user = await GetUserInfoWithSdk();
-            return user;
-
-        }
-
-        private async Task<User> GetUserInfoWithSdk()
-        {
-
-
-            var user = await _graphClient?
-                                    .Me
-                                    .Request()
-                                    .GetAsync();
-            return user;
-        }
-
-        private async Task<Microsoft.Graph.Application> CreateAppWithSdk(string appName)
-        {
-            var application = new Microsoft.Graph.Application
-            {
-                DisplayName = appName
-            };
-
-            var createdApp = await _graphClient?.Applications
-                                                    .Request()
-                                                    .AddAsync(application);
-
-            return createdApp;
-        }
-
-        private async void SignInWithSdkButton_Click(object sender, RoutedEventArgs e)
-        {
-            ResultText.Text = "Loading...";
-            TokenInfoText.Text = "Loading...";
-
-            var user = await AuthenticateWithSdk();
-
-            ResultText.Text = $"The user {user.DisplayName} has successfully logged";
-            TokenInfoText.Text = $"Username: {user.DisplayName}" + Environment.NewLine;
-            TokenInfoText.Text += $"Token Expires: {user.RefreshTokensValidFromDateTime.Value.ToLocalTime()}" + Environment.NewLine;
-
-            this.SignInButton.Visibility = Visibility.Collapsed;
-            this.SignInWithSdkButton.Visibility = Visibility.Collapsed;
-            this.SignOutButton.Visibility = Visibility.Visible;
-
-            this.GetUserInfoButton.Visibility = Visibility.Visible;
-            this.GetTenantARMButton.Visibility = Visibility.Visible;
-            this.GetTenantGraphButton.Visibility = Visibility.Visible;
-            this.CreateAppButton.Visibility = Visibility.Visible;
-        }
-
-        private async void CreateAppButton_Click(object sender, RoutedEventArgs e)
-        {
-            var appName = "My new App to test";
-
-            //await CreateAppWithGraphHttpRequest(appName);
-            var app = await CreateAppWithSdk(appName);
-        }
-
-        private async Task CreateAppWithGraphHttpRequest(string appName)
-        {
-            var graphUrl = "https://graph.microsoft.com/beta";
-            var createAppUri = "applications";
-            var serializedApp = JsonConvert.SerializeObject( new { displayName = appName });
-            var accessToken = await GetAccessToken(scopesToCreateApp);
-
-            try
-            {
-                using (var httpClient = new HttpClient())
-                {
-                    httpClient.BaseAddress = new Uri($"{graphUrl}/");
-                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-                    var response = await httpClient.PostAsync(createAppUri, new StringContent(serializedApp, Encoding.UTF8, "application/json"));
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var content = response.Content;
-                        var text = await content.ReadAsStringAsync();
-                    }
-                    else
-                    {
-                        var result = await response.Content.ReadAsStreamAsync();
-                        // TODO WTS: Please handle other status codes as appropriate to your scenario
-                    }
-                }
+                TenantList.Items.Add(tenant);
             }
 
-            catch (Exception ex)
-            {
-            }
+            var tenantJson = JsonConvert.SerializeObject(tenants, Formatting.Indented);
+            ResultText.Text = tenantJson;
+        }
 
+        private void TenantList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ValidateCreateApp();
+        }
+
+        private void AppNameText_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ValidateCreateApp();
+        }
+
+        private void AudienceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ValidateCreateApp();
+        }
+
+        private void ValidateCreateApp()
+        {
+            var hasSelectedItem = TenantList.SelectedItem != null;
+            var hasValidAppName = !string.IsNullOrWhiteSpace(AppNameText.Text);
+            var hasValidAudience = AudienceComboBox.SelectedItem != null; 
+
+            CreateAppButton.IsEnabled = hasSelectedItem && hasValidAppName && hasValidAudience;
+            CreateAppWithSdkButton.IsEnabled = hasSelectedItem && hasValidAppName && hasValidAudience;
         }
     }
 }

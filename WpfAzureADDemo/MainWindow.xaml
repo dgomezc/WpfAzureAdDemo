@@ -3,35 +3,70 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:WpfAzureADDemo"
+        xmlns:enums="clr-namespace:Microsoft.Identity.Client;assembly=Microsoft.Identity.Client"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="MainWindow" Height="500" Width="800">
     <Window.Resources>
         <Style TargetType="{x:Type Button}">
             <Setter Property="Padding" Value="5"></Setter>
-            <Setter Property="Margin" Value="5"></Setter>
+            <Setter Property="Margin" Value="0,5"></Setter>
+            <Setter Property="MinWidth" Value="100"></Setter>
             <Setter Property="FontFamily" Value="Segoe Ui"></Setter>
         </Style>
+        <Style TargetType="{x:Type GroupBox}">
+            <Setter Property="Padding" Value="10"></Setter>
+            <Setter Property="FontFamily" Value="Segoe Ui"></Setter>
+            <Setter Property="FontWeight" Value="Bold"></Setter>
+            <Setter Property="BorderBrush" Value="SkyBlue"></Setter>
+        </Style>
+        <ObjectDataProvider x:Key="audienceEnums" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
+            <ObjectDataProvider.MethodParameters>
+                <x:Type TypeName="enums:AadAuthorityAudience"/>
+            </ObjectDataProvider.MethodParameters>
+        </ObjectDataProvider>
     </Window.Resources>
-    <Grid>
-        <StackPanel Background="Azure">
-            
-            <Button x:Name="SignInWithSdkButton" Content="Sign-In (Graph Sdk)" Click="SignInWithSdkButton_Click" HorizontalAlignment="Left"/>
-            
-            <StackPanel Orientation="Horizontal">                
-                <Button x:Name="SignInButton" Content="Sign-In" Click="SignInButton_Click" HorizontalAlignment="Left"/>
-                <Button x:Name="SignOutButton" Content="Sign-Out" Click="SignOutButton_Click" Visibility="Collapsed" HorizontalAlignment="Left"/>
+    <Grid Background="Azure">
+        <Grid Margin="10">
+            <Grid.RowDefinitions>
+            <RowDefinition Height="auto" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="auto" />
+            <ColumnDefinition Width="10"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-                <Button x:Name="GetUserInfoButton" Content="Get user info" Click="GetUserInfoButton_Click" Visibility="Collapsed" HorizontalAlignment="Right" />
-                <Button x:Name="GetTenantARMButton" Content="Get Tenant info with ARM" Click="GetTenantWithARMButton_Click" Visibility="Collapsed" HorizontalAlignment="Right" />
-                <Button x:Name="GetTenantGraphButton" Content="Get Tenant info with Graph" Click="GetTenantWithGraphButton_Click" Visibility="Collapsed" HorizontalAlignment="Right" />
-                <Button x:Name="CreateAppButton" Content="Create App" Click="CreateAppButton_Click" Visibility="Collapsed" HorizontalAlignment="Right" />
-
+            <!-- User bar -->
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Grid.ColumnSpan="3">
+                <Button x:Name="SignInButton" Content="Sign-In" Click="SignInButton_Click" />
+                <TextBlock x:Name="UserInfoText" Visibility="Collapsed" VerticalAlignment="Center" Margin="5,0" FontWeight="Bold" FontFamily="Segoe Ui"/>
+                <Button x:Name="SignOutButton" Content="Sign-Out" Click="SignOutButton_Click" Visibility="Collapsed" />
             </StackPanel>
-            <Label Content="API Call Results" Margin="0,0,0,-5" FontFamily="Segoe Ui" />
-            <TextBox x:Name="ResultText" TextWrapping="Wrap" MinHeight="120" MaxHeight="250" ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Auto" Margin="5" FontFamily="Segoe Ui"/>
-            <Label Content="Token Info" Margin="0,0,0,-5" FontFamily="Segoe Ui" />
-            <TextBox x:Name="TokenInfoText" TextWrapping="Wrap" MinHeight="70" Margin="5" FontFamily="Segoe Ui"/>
-        </StackPanel>
+
+            <!-- Commands -->
+            <GroupBox Grid.Row="2" Grid.Column="0" Header="Commands">
+                <StackPanel>
+                    <Button x:Name="GetTenantARMButton" Content="Get Tenant info with ARM" Click="GetTenantWithARMButton_Click" IsEnabled="False"/>
+                    <Button x:Name="GetTenantGraphButton" Content="Get Tenant info with Graph" Click="GetTenantWithGraphButton_Click" IsEnabled="False" />
+                    <ListBox x:Name="TenantList" DisplayMemberPath="DisplayName" Margin="0,10,0, 25" Height="100" SelectionChanged="TenantList_SelectionChanged" />
+                    
+                    <Label Content="App Name" />
+                    <TextBox x:Name="AppNameText" TextChanged="AppNameText_TextChanged" Padding="3" Margin="0,5" />
+
+                    <Label Content="Audience" />
+                    <ComboBox x:Name="AudienceComboBox" ItemsSource="{Binding Source={StaticResource audienceEnums}}" SelectionChanged="AudienceComboBox_SelectionChanged"/>
+                    <Button x:Name="CreateAppButton" Content="Create App" Click="CreateAppButton_Click" IsEnabled="False" VerticalAlignment="Bottom" />
+                    <Button x:Name="CreateAppWithSdkButton" Content="Create App with SDK" Click="CreateAppWithSdkButton_Click" IsEnabled="False" VerticalAlignment="Bottom" />
+                </StackPanel>
+            </GroupBox>
+
+            <!-- Result -->
+            <GroupBox Grid.Row="2" Grid.Column="2" Header="API Call Results" >
+                <TextBox x:Name="ResultText" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto" FontWeight="Normal" Padding="5" />
+            </GroupBox>
+        </Grid>
     </Grid>
 </Window>
