@@ -137,6 +137,30 @@ namespace WpfAzureADDemo
             }
         }
 
+        private async void GetAppsWithSdkButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ResultText.Text = "Getting apps...";
+
+                var tenantId = (TenantList.SelectedItem as TenantInfo).TenantId;
+                var graphSdkService = new GraphSdkService(_graphService, tenantId);
+
+                var apps = await graphSdkService.GetApps();
+                var appsJson = JsonConvert.SerializeObject(apps, Formatting.Indented);
+
+                ResultText.Text = appsJson;
+            }
+            catch (ServiceException ex)
+            {
+                ResultText.Text = ex.InnerException?.Message ?? ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ResultText.Text = ex.Message;
+            }
+        }
+
         private void ChangeButtonStatus(AuthenticationResult result = null)
         {
             var isLogged = result != null;
@@ -174,6 +198,7 @@ namespace WpfAzureADDemo
 
         private void TenantList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            ValidateGetApps();
             ValidateCreateApp();
         }
 
@@ -191,10 +216,17 @@ namespace WpfAzureADDemo
         {
             var hasSelectedItem = TenantList.SelectedItem != null;
             var hasValidAppName = !string.IsNullOrWhiteSpace(AppNameText.Text);
-            var hasValidAudience = AudienceComboBox.SelectedItem != null; 
+            var hasValidAudience = AudienceComboBox.SelectedItem != null;
 
             CreateAppButton.IsEnabled = hasSelectedItem && hasValidAppName && hasValidAudience;
             CreateAppWithSdkButton.IsEnabled = hasSelectedItem && hasValidAppName && hasValidAudience;
+        }
+
+        private void ValidateGetApps()
+        {
+            var hasSelectedItem = TenantList.SelectedItem != null;
+
+            GetAppsButton.IsEnabled = hasSelectedItem;
         }
     }
 }

@@ -68,5 +68,16 @@ namespace WpfAzureADDemo.Services
 
             return createdApp;
         }
+
+        public async Task<IGraphServiceApplicationsCollectionPage> GetApps()
+        {
+            var apps = await _graphClient?
+                                    .Applications
+                                    .Request()
+                                    .GetAsync();
+
+            return apps;
+        }
+
     }
 }
